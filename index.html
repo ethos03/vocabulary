@@ -256,10 +256,6 @@ main{max-width:1300px;margin:auto;padding:18px 28px 60px}
   let savedChapters = JSON.parse(localStorage.getItem(chaptersKey) || '[]');
   let wordChapterMap = JSON.parse(localStorage.getItem(wordChaptersKey) || '{}');
 
-  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&', '<': '<', '>': '>', '"': '"', "'": '''
-  }[c]));
-
   const norm = s => String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
