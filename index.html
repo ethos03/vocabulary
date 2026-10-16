@@ -252,7 +252,7 @@ main{max-width:1300px;margin:auto;padding:18px 28px 60px}
   let selectedChapter = 'Tous';
   let stats = JSON.parse(localStorage.getItem(localKey) || '{}');
 
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'''}[c]));
+const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u0026amp;','<':'\u0026lt;','>':'\u0026gt;','\u0022':'\u0026quot;','\u0027':'\u0026#39;'}[c]));
 
   const norm = s => String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
