@@ -256,7 +256,9 @@ main{max-width:1300px;margin:auto;padding:18px 28px 60px}
   let savedChapters = JSON.parse(localStorage.getItem(chaptersKey) || '[]');
   let wordChapterMap = JSON.parse(localStorage.getItem(wordChaptersKey) || '{}');
 
-const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u0026amp;','<':'\u0026lt;','>':'\u0026gt;','\u0022':'\u0026quot;','\u0027':'\u0026#39;'}[c]));
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&', '<': '<', '>': '>', '"': '"', "'": '''
+  }[c]));
 
   const norm = s => String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -294,19 +296,38 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
     speechSynthesis.speak(u);
   }
 
+  // ---------- ADMIN : persistance de session ----------
   function isAdmin() { return !!localStorage.getItem(tokenKey); }
+
+  function applyAdminUI() {
+    document.body.classList.toggle('is-admin', isAdmin());
+  }
+
+  function logoutAdmin(silent = false) {
+    localStorage.removeItem(tokenKey);
+    applyAdminUI();
+    if (!silent) toast('Session admin expirée, reconnecte-toi');
+  }
 
   async function api(url, opt = {}) {
     const h = { 'Content-Type': 'application/json' };
     if (isAdmin()) h.Authorization = 'Bearer ' + localStorage.getItem(tokenKey);
     const r = await fetch(API + url, { ...opt, headers: h });
+    if (r.status === 401 || r.status === 403) {
+      logoutAdmin();
+      throw Error('Session expirée');
+    }
     if (!r.ok) throw Error((await r.json().catch(() => ({}))).error || 'Erreur');
     return r.json();
   }
 
   async function load() {
+    applyAdminUI();
     try { words = await api('/words'); } catch (e) { words = []; console.error(e); }
-    words = words.map(w => ({ ...w, chapter: w.chapter || wordChapterMap[w.id] || wordChapterMap[`${w.english}\u0000${w.translation}`] || '' }));
+    words = words.map(w => ({
+      ...w,
+      chapter: w.chapter || wordChapterMap[w.id] || wordChapterMap[`${w.english}\u0000${w.translation}`] || ''
+    }));
     const discovered = words.map(w => w.chapter).filter(Boolean);
     savedChapters = [...new Set([...savedChapters, ...discovered])].sort((a, b) => a.localeCompare(b, 'fr'));
     localStorage.setItem(chaptersKey, JSON.stringify(savedChapters));
@@ -314,46 +335,61 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
     renderAll();
   }
 
+  // ---------- CHAPITRES ----------
   function chapterList() {
-    return [...new Set([...savedChapters, ...words.map(w => w.chapter || 'Sans chapitre')])].sort((a, b) => a.localeCompare(b, 'fr'));
+    const set = new Set([...savedChapters, ...words.map(w => w.chapter).filter(Boolean)]);
+    return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
   }
 
-  function chapterWords(chapter) {
-    return words.filter(w => (w.chapter || 'Sans chapitre') === chapter);
+  function chapterWords(c) {
+    return words.filter(w => (w.chapter || 'Sans chapitre') === c);
   }
 
-  function createChapter() {
-    const name = prompt('Nom du nouveau chapitre :');
-    if (!name || !name.trim()) return;
-    const clean = name.trim();
-    if (chapterList().includes(clean)) return toast('Ce chapitre existe déjà');
-    savedChapters = [...savedChapters, clean].sort((a, b) => a.localeCompare(b, 'fr'));
-    localStorage.setItem(chaptersKey, JSON.stringify(savedChapters));
-    selectedChapter = clean;
-    renderAll();
-    toast('Chapitre créé');
+  function filteredWords() {
+    const c = $('#chapterFilter').value || 'Tous';
+    return c === 'Tous' ? words : chapterWords(c);
   }
 
-  function renderAll() {
-    renderChapters();
-    renderChapterFilter();
-    renderWords();
-    renderEvals();
-    renderStats();
-    updateWheel();
-    renderChapterDatalist();
+  function renderChapterFilter() {
+    const sel = $('#chapterFilter');
+    const prev = sel.value || selectedChapter;
+    const chs = chapterList();
+    sel.innerHTML = ['<option value="Tous">Tous les chapitres</option>']
+      .concat(chs.map(c => `<option value="${esc(c)}">${esc(c)}</option>`)).join('');
+    sel.value = chs.includes(prev) || prev === 'Tous' ? prev : 'Tous';
+    $('#chList').innerHTML = chs.map(c => `<option value="${esc(c)}"></option>`).join('');
   }
 
   function renderChapters() {
     const grid = $('#chapterGrid');
     const chs = chapterList();
-    const cards = [`<button class="chcard" data-ch="Tous"><h3>Tous les chapitres</h3><div class="small">${words.length} mot(s)</div><div class="small" style="margin-top:12px">Voir la roue générale →</div></button>`];
+    const cards = [`
+      <button class="chcard" data-ch="Tous">
+        <h3>Tous les chapitres</h3>
+        <div class="small">${words.length} mot(s)</div>
+        <div class="small" style="margin-top:12px">Voir la roue générale →</div>
+      </button>`];
+
     chs.forEach(c => {
       const list = chapterWords(c);
-      const preview = list.slice(0, 4).map(w => `<li>${esc(w.english)} <span>→ ${esc(w.translation)}</span></li>`).join('');
-      cards.push(`<article class="chcard"><div class="chwheel" data-chwheel="${esc(c)}"></div><h3>${esc(c)}</h3><div class="small">${list.length} mot(s)</div>${list.length ? `<ul class="chwords">${preview}</ul><button class="chspin" data-spin-ch="${esc(c)}">Tourner la roue</button><div class="small" data-result-ch="${esc(c)}" style="margin-top:8px"></div>` : '<div class="empty" style="padding:14px 0">Chapitre vide</div>'}</article>`);
+      const preview = list.slice(0, 4).map(w =>
+        `<li>${esc(w.english)} <span>→ ${esc(w.translation)}</span></li>`).join('');
+      cards.push(`
+        <article class="chcard">
+          ${isAdmin() ? `<button class="admin-inline secondary" data-delchap="${esc(c)}" style="float:right;padding:5px 8px" title="Supprimer le chapitre">🗑️</button>` : ''}
+          <div class="chwheel" data-chwheel="${esc(c)}"></div>
+          <h3>${esc(c)}</h3>
+          <div class="small">${list.length} mot(s)</div>
+          ${list.length
+            ? `<ul class="chwords">${preview}</ul>
+               <button class="chspin" data-spin-ch="${esc(c)}">Tourner la roue</button>
+               <div class="small" data-result-ch="${esc(c)}" style="margin-top:8px"></div>`
+            : '<div class="empty" style="padding:14px 0">Chapitre vide</div>'}
+        </article>`);
     });
+
     grid.innerHTML = cards.join('');
+
     grid.querySelectorAll('[data-ch]').forEach(b => {
       b.onclick = () => {
         selectedChapter = b.dataset.ch;
@@ -363,36 +399,39 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
         updateWheel();
       };
     });
+
     grid.querySelectorAll('[data-spin-ch]').forEach(b => b.onclick = e => {
       e.stopPropagation();
-      const c = b.dataset.spinCh, list = chapterWords(c);
+      const c = b.dataset.spinCh;
+      const list = chapterWords(c);
       if (!list.length) return;
       const i = Math.floor(Math.random() * list.length);
-      const wheel = grid.querySelector(`[data-chwheel=\"${CSS.escape(c)}\"]`);
+      const wheel = grid.querySelector(`[data-chwheel="${CSS.escape(c)}"]`);
       if (wheel) wheel.style.transform = `rotate(${720 + Math.random() * 360}deg)`;
-      const out = grid.querySelector(`[data-result-ch=\"${CSS.escape(c)}\"]`);
+      const out = grid.querySelector(`[data-result-ch="${CSS.escape(c)}"]`);
       if (out) out.textContent = `→ ${list[i].english} · ${list[i].translation}`;
+    });
+
+    grid.querySelectorAll('[data-delchap]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      deleteChapter(b.dataset.delchap);
     });
   }
 
-  function renderChapterFilter() {
-    const sel = $('#chapterFilter');
-    const chs = chapterList();
-    sel.innerHTML = `<option value="Tous">Tous les chapitres</option>` +
-      chs.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    sel.value = chs.includes(selectedChapter) || selectedChapter === 'Tous' ? selectedChapter : 'Tous';
-    selectedChapter = sel.value;
+  async function deleteChapter(name) {
+    const list = chapterWords(name);
+    if (!confirm(`Supprimer le chapitre "${name}" et ses ${list.length} mot(s) ?`)) return;
+    try {
+      for (const w of list) await api('/words/' + w.id, { method: 'DELETE' });
+      savedChapters = savedChapters.filter(c => c !== name);
+      localStorage.setItem(chaptersKey, JSON.stringify(savedChapters));
+      if (selectedChapter === name) selectedChapter = 'Tous';
+      await load();
+      toast('Chapitre supprimé');
+    } catch (e) { toast(e.message); }
   }
 
-  function renderChapterDatalist() {
-    $('#chList').innerHTML = chapterList().map(c => `<option value="${esc(c)}">`).join('');
-  }
-
-  function filteredWords() {
-    if (selectedChapter === 'Tous') return words;
-    return words.filter(w => (w.chapter || 'Sans chapitre') === selectedChapter);
-  }
-
+  // ---------- LISTE / ROUE ----------
   function renderWords() {
     const list = filteredWords();
     $('#count').textContent = list.length + ' ' + (list.length < 2 ? 'mot' : 'mots');
@@ -496,30 +535,47 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
   }
 
   function renderStats() {
-    const a = words.map(w => {
+    const rows = words.map(w => {
       const s = stats[w.id] || { right: 0, total: 0 };
-      return { ...w, pct: s.total ? Math.round(100 * s.right / s.total) : 0, total: s.total };
-    }).filter(w => w.total).sort((a, b) => a.pct - b.pct);
+      return { w, total: s.total, rate: s.total ? s.right / s.total : null };
+    }).filter(r => r.total > 0);
 
-    const make = arr => arr.length
-      ? arr.slice(0, 6).map(w => `<div class="bar"><span>${esc(w.english)}</span><span class="barline"><i style="width:${w.pct}%"></i></span><b>${w.pct}%</b></div>`).join('')
-      : '<div class="empty">Réponds à quelques questions pour voir tes stats.</div>';
+    const bad = rows.slice().sort((a, b) => a.rate - b.rate).slice(0, 8);
+    const good = rows.slice().sort((a, b) => b.rate - a.rate).slice(0, 8);
 
-    $('#badStats').innerHTML = make(a);
-    $('#goodStats').innerHTML = make(a.slice().reverse());
+    const bar = r => `
+      <div class="bar">
+        <span>${esc(r.w.english)}</span>
+        <div class="barline"><i style="width:${Math.round(r.rate * 100)}%"></i></div>
+        <span>${Math.round(r.rate * 100)}%</span>
+      </div>`;
+
+    $('#badStats').innerHTML = bad.length ? bad.map(bar).join('') : '<div class="empty">Pas encore de données.</div>';
+    $('#goodStats').innerHTML = good.length ? good.map(bar).join('') : '<div class="empty">Pas encore de données.</div>';
   }
 
-  // Événements
-  $('#newChapterBtn').onclick = createChapter;
+  function renderAll() {
+    applyAdminUI();
+    renderChapterFilter();
+    renderChapters();
+    renderWords();
+    updateWheel();
+    renderEvals();
+    renderStats();
+  }
+
+  // ---------- ÉVÉNEMENTS ----------
   $('#spin').onclick = spin;
   $('#wheel').onclick = spin;
   $('#wheel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); spin(); } };
 
-  $('#chapterFilter').onchange = e => {
-    selectedChapter = e.target.value;
+  $('#chapterFilter').onchange = () => {
+    selectedChapter = $('#chapterFilter').value;
     renderWords();
     updateWheel();
   };
+
+  $('#mode').onchange = () => {};
 
   $('#answerForm').onsubmit = e => {
     e.preventDefault();
@@ -545,27 +601,41 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
 
   $('#adminBtn').onclick = () => {
     if (!isAdmin()) { $('#modal').hidden = false; return; }
-    document.body.classList.add('is-admin');
-    toast('Mode admin activé');
+    toast('Déjà en mode admin');
   };
   $('#closeModal').onclick = () => $('#modal').hidden = true;
 
   $('#loginForm').onsubmit = async e => {
     e.preventDefault();
+    const password = new FormData(e.target).get('password');
     try {
-      const r = await api('/login', {
+      const r = await fetch(API + '/login', {
         method: 'POST',
-        body: JSON.stringify({ password: new FormData(e.target).get('password') })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
       });
-      localStorage.setItem(tokenKey, r.token);
+      if (!r.ok) throw Error('Mot de passe incorrect');
+      const { token } = await r.json();
+      localStorage.setItem(tokenKey, token);
       $('#modal').hidden = true;
-      document.body.classList.add('is-admin');
+      e.target.reset();
+      $('#loginMsg').textContent = '';
+      applyAdminUI();
       renderAll();
-      toast('Connexion admin réussie');
+      toast('Connecté en admin');
     } catch (err) {
       $('#loginMsg').textContent = err.message;
       $('#loginMsg').className = 'result bad';
     }
+  };
+
+  $('#newChapterBtn').onclick = () => {
+    const name = prompt('Nom du nouveau chapitre :');
+    if (!name || !name.trim()) return;
+    savedChapters = [...new Set([...savedChapters, name.trim()])].sort((a, b) => a.localeCompare(b, 'fr'));
+    localStorage.setItem(chaptersKey, JSON.stringify(savedChapters));
+    renderAll();
+    toast('Chapitre créé');
   };
 
   $('#wordForm').onsubmit = async e => {
@@ -575,7 +645,9 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
       const ch = b.chapter;
       const created = await api('/words', { method: 'POST', body: JSON.stringify(b) });
       if (b.chapter && created && created.id) {
-        try { await api('/words/' + created.id, { method: 'PUT', body: JSON.stringify({ chapter: b.chapter.trim() }) }); } catch (err) { console.warn('Chapitre non persisté côté serveur', err); }
+        try {
+          await api('/words/' + created.id, { method: 'PUT', body: JSON.stringify({ chapter: b.chapter.trim() }) });
+        } catch (err) { console.warn('Chapitre non persisté côté serveur', err); }
       }
       if (b.chapter) {
         savedChapters = [...new Set([...savedChapters, b.chapter.trim()])].sort((a, z) => a.localeCompare(z, 'fr'));
@@ -602,7 +674,8 @@ const esc = s => String(s ?? '').replace(/[&<>\u0022\u0027]/g, c => ({'&':'\u002
     } catch (err) { toast(err.message); }
   };
 
-  if (isAdmin()) document.body.classList.add('is-admin');
+  // ---------- DÉMARRAGE ----------
+  applyAdminUI();
   load();
 })();
 </script>
