@@ -21,8 +21,11 @@ async function initDb() {
       english TEXT NOT NULL,
       translation TEXT NOT NULL,
       synonym TEXT DEFAULT '',
-      antonym TEXT DEFAULT ''
+      antonym TEXT DEFAULT '',
+      chapter TEXT DEFAULT 'Sans chapitre'
     );
+    ALTER TABLE words ADD COLUMN IF NOT EXISTS chapter TEXT DEFAULT 'Sans chapitre';
+    UPDATE words SET chapter='Sans chapitre' WHERE chapter IS NULL OR chapter='';
     CREATE TABLE IF NOT EXISTS evaluations (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -81,7 +84,7 @@ const server = http.createServer(async (req, res) => {
 
     // Lire les mots
     if (p === '/api/words' && req.method === 'GET') {
-      const r = await pool.query('SELECT * FROM words ORDER BY english');
+      const r = await pool.query('SELECT * FROM words ORDER BY chapter, english');
       return send(res, 200, r.rows);
     }
 
@@ -95,11 +98,12 @@ const server = http.createServer(async (req, res) => {
         english: String(b.english).trim(),
         translation: String(b.translation).trim(),
         synonym: String(b.synonym || '').trim(),
-        antonym: String(b.antonym || '').trim()
+        antonym: String(b.antonym || '').trim(),
+        chapter: String(b.chapter || '').trim() || 'Sans chapitre'
       };
       await pool.query(
-        'INSERT INTO words (id, english, translation, synonym, antonym) VALUES ($1,$2,$3,$4,$5)',
-        [w.id, w.english, w.translation, w.synonym, w.antonym]
+        'INSERT INTO words (id, english, translation, synonym, antonym, chapter) VALUES ($1,$2,$3,$4,$5,$6)',
+        [w.id, w.english, w.translation, w.synonym, w.antonym, w.chapter]
       );
       return send(res, 201, w);
     }
@@ -118,8 +122,8 @@ const server = http.createServer(async (req, res) => {
       if (!cur.rowCount) return send(res, 404, { error: 'Mot introuvable' });
       const w = { ...cur.rows[0], ...b, id: ident };
       await pool.query(
-        'UPDATE words SET english=$1, translation=$2, synonym=$3, antonym=$4 WHERE id=$5',
-        [w.english, w.translation, w.synonym || '', w.antonym || '', ident]
+        'UPDATE words SET english=$1, translation=$2, synonym=$3, antonym=$4, chapter=$5 WHERE id=$6',
+        [w.english, w.translation, w.synonym || '', w.antonym || '', w.chapter || 'Sans chapitre', ident]
       );
       return send(res, 200, w);
     }
